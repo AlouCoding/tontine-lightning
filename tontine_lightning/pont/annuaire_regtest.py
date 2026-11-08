@@ -23,7 +23,7 @@ _NOM = re.compile(r"^[a-z0-9._+-]{1,64}$")
 
 @dataclass(frozen=True)
 class ReglagesAnnuaire:
-    url_publique: str  # base vue par le backend, ex. http://localhost:8001
+    url_publique: str  # base vue par le backend, ex. http://127.0.0.1:18001
     lnd_rest: str  # ex. https://lnd-membres:8080
     lnd_cert: str  # chemin du tls.cert
     lnd_macaroon: str  # chemin d'invoice.macaroon (ne permet que de créer des factures)

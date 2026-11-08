@@ -96,7 +96,7 @@ def _app_depuis_env() -> FastAPI:
     annuaire = None
     if os.environ.get("ANNUAIRE_REGTEST", "").lower() in {"1", "true", "oui"}:
         annuaire = ReglagesAnnuaire(
-            url_publique=os.environ.get("ANNUAIRE_URL_PUBLIQUE", "http://127.0.0.1:8001").rstrip("/"),
+            url_publique=os.environ.get("ANNUAIRE_URL_PUBLIQUE", "http://127.0.0.1:18001").rstrip("/"),
             lnd_rest=os.environ.get("LND_MEMBRES_REST", "https://lnd-membres:8080"),
             lnd_cert=os.environ.get("LND_MEMBRES_CERT", "/lnd-membres/tls.cert"),
             lnd_macaroon=os.environ.get(

@@ -43,7 +43,7 @@ def _bool(nom: str, defaut: bool) -> bool:
 
 
 def _domaines_locaux(brut: str) -> dict[str, str]:
-    """« regtest.local=http://localhost:8001,autre=http://x » -> {domaine: url_de_base}."""
+    """« regtest.local=http://127.0.0.1:18001,autre=http://x » -> {domaine: url_de_base}."""
     resultat: dict[str, str] = {}
     for paire in filter(None, (p.strip() for p in brut.split(","))):
         domaine, _, url = paire.partition("=")

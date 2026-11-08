@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import subprocess
 import sys
@@ -22,8 +23,22 @@ from typing import Any, Callable
 
 RACINE = Path(__file__).resolve().parents[1]
 FICHIER_ENV = RACINE / ".env"
-LNBITS = "http://127.0.0.1:5000"  # 127.0.0.1 et non localhost : évite ~2 s de tentative IPv6 sous Windows
-PONT = "http://127.0.0.1:8001"
+
+
+def _port(nom: str, defaut: str) -> str:
+    """Port lu dans l'environnement, sinon dans .env, sinon la valeur par défaut."""
+    if os.environ.get(nom):
+        return os.environ[nom]
+    if FICHIER_ENV.exists():
+        for ligne in FICHIER_ENV.read_text(encoding="utf-8").splitlines():
+            if ligne.strip().startswith(f"{nom}="):
+                return ligne.split("=", 1)[1].strip() or defaut
+    return defaut
+
+
+# 127.0.0.1 et non localhost : évite ~2 s de tentative IPv6 sous Windows
+LNBITS = f"http://127.0.0.1:{_port('LNBITS_PORT', '5000')}"
+PONT = f"http://127.0.0.1:{_port('PONT_PORT', '18001')}"
 CAPACITE_CANAL_SATS = 5_000_000
 RESERVE_FRAIS_SATS = 20_000
 BTC_RPC = ["-regtest", "-rpcport=18443", "-rpcuser=tontine", "-rpcpassword=tontine-regtest"]
@@ -158,6 +173,10 @@ def cmd_init(_: argparse.Namespace) -> None:
 
     etape("Canaux de paiement (dans les deux sens)")
     cles = {n: lncli(n, "getinfo")["identity_pubkey"] for n in noeuds}
+    if any(lncli(n, "pendingchannels")["pending_open_channels"] for n in noeuds):
+        miner(6)  # canal resté en attente (init interrompu) : on le confirme avant d'en ouvrir un autre
+        attendre(lambda: not any(lncli(n, "pendingchannels")["pending_open_channels"] for n in noeuds),
+                 "confirmation des canaux en attente")
     ouverts = False
     for source, cible in (("lnd-membres", "lnd-tontine"), ("lnd-tontine", "lnd-membres")):
         deja = _canal_initie_par(source, cles[cible])
@@ -166,9 +185,14 @@ def cmd_init(_: argparse.Namespace) -> None:
         lancer(["docker", "compose", "exec", "-T", "-u", "lnd", source, "lncli", "--lnddir=/home/lnd/.lnd", "--network=regtest",
                 "connect", f"{cles[cible]}@{cible}:9735"], verifier=False)  # « already connected » est sans gravité
         lncli(source, "openchannel", f"--node_key={cles[cible]}", f"--local_amt={CAPACITE_CANAL_SATS}")
+        # LND n'accepte qu'UN canal en attente par pair (maxpendingchannels=1) : on confirme
+        # chaque canal (6 blocs) avant d'ouvrir le suivant.
+        miner(6)
+        attendre(lambda s=source, c=cles[cible]: _canal_initie_par(s, c) and not lncli(s, "pendingchannels")["pending_open_channels"],
+                 f"confirmation du canal {source} -> {cible}")
         ouverts = True
     if ouverts:
-        miner(6)
+        miner(1)
     attendre(lambda: len(lncli("lnd-tontine", "listchannels", "--active_only")["channels"]) >= 2, "canaux actifs")
     ok(f"2 canaux de {CAPACITE_CANAL_SATS:,} sats actifs entre tontine et membres".replace(",", " "))
 

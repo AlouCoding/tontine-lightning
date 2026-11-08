@@ -7,7 +7,8 @@
 #   pont          webhooks LNbits -> backend + annuaire d'adresses nom@regtest.local
 #
 # Démarrage : docker compose up -d   puis   python scripts/regtest.py init
-# Seuls LNbits (5000) et le pont (8001) sont exposés, et uniquement sur 127.0.0.1.
+# Seuls LNbits (LNBITS_PORT, 5000) et le pont (PONT_PORT, 18001) sont exposés, et uniquement sur 127.0.0.1.
+# Port déjà pris par un autre projet ? Changer LNBITS_PORT / PONT_PORT dans .env.
 
 name: tontine-lightning
 
@@ -120,7 +121,7 @@ services:
       - lnd-tontine:/lnd:ro
       - lnbits:/app/data
     ports:
-      - "127.0.0.1:5000:5000"
+      - "127.0.0.1:${LNBITS_PORT:-5000}:5000"
     restart: unless-stopped
 
   pont:
@@ -135,7 +136,7 @@ services:
       PONT_JETON_BACKEND: ${PONT_JETON_BACKEND:-}
       BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:8000}
       ANNUAIRE_REGTEST: "true"
-      ANNUAIRE_URL_PUBLIQUE: http://127.0.0.1:8001
+      ANNUAIRE_URL_PUBLIQUE: http://127.0.0.1:${PONT_PORT:-18001}
       LND_MEMBRES_REST: https://lnd-membres:8080
       LND_MEMBRES_CERT: /lnd-membres/tls.cert
       LND_MEMBRES_MACAROON: /lnd-membres/data/chain/bitcoin/regtest/invoice.macaroon
@@ -145,7 +146,7 @@ services:
       - lnd-membres:/lnd-membres:ro
       - pont:/donnees
     ports:
-      - "127.0.0.1:8001:8000"
+      - "127.0.0.1:${PONT_PORT:-18001}:8000"
     restart: unless-stopped
 
 volumes:
