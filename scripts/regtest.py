@@ -96,12 +96,15 @@ def attendre(condition: Callable[[], Any], description: str, delai_s: int = 120)
     raise TimeoutError(f"Délai dépassé : {description}" + (f" ({derniere})" if derniere else ""))
 
 
+_OUVREUR = urllib.request.build_opener(urllib.request.ProxyHandler({}))  # services locaux : pas de proxy
+
+
 def http_json(methode: str, url: str, corps: dict | None = None, cle: str | None = None) -> Any:
     requete = urllib.request.Request(url, method=methode, data=json.dumps(corps).encode() if corps is not None else None)
     requete.add_header("Content-Type", "application/json")
     if cle:
         requete.add_header("X-Api-Key", cle)
-    with urllib.request.urlopen(requete, timeout=15) as rep:
+    with _OUVREUR.open(requete, timeout=15) as rep:
         return json.loads(rep.read() or b"null")
 
 
@@ -197,7 +200,7 @@ def cmd_init(_: argparse.Namespace) -> None:
     ok(f"2 canaux de {CAPACITE_CANAL_SATS:,} sats actifs entre tontine et membres".replace(",", " "))
 
     etape("Portefeuille LNbits de la tontine")
-    attendre(lambda: urllib.request.urlopen(LNBITS, timeout=5).status == 200, "LNbits", 180)
+    attendre(lambda: _OUVREUR.open(LNBITS, timeout=5).status == 200, "LNbits", 180)
     env = lire_env()
     cle_facture, cle_admin = env.get("LNBITS_INVOICE_KEY", ""), env.get("LNBITS_ADMIN_KEY", "")
     cle_valide = False

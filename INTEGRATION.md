@@ -1,8 +1,12 @@
-# Intégration avec le moteur (backend/) — à voir avec Fatou
+# Intégration avec le moteur (backend/)
 
-J'ai branché le **vrai** `backend/app/tontine.py` sur `LightningLNbits` dans les tests (`tests/test_integration_moteur.py`). Un tour complet fonctionne : 3 cotisations, confirmation, versement, démarrage du tour 2.
+> ✅ **Statut : les 4 corrections sont appliquées** par Fatou dans `backend/` (commit `f9ce2df`).
+> Elles sont vérifiées par `tests/test_integration_backend.py`, qui charge directement le vrai
+> `backend/app` du dépôt (aucune copie). Ce document reste comme trace des décisions.
 
-Le croisement des deux codes, puis une relecture de sécurité indépendante, font apparaître **4 corrections nécessaires dans `backend/`** (des petits changements). Chaque problème est **reproduit par un test**, et chaque correction est **prouvée** sur une copie de `tontine.py` (`tests/backend_fatou/tontine_corrige.py`).
+Le **vrai** `backend/app/tontine.py` est branché sur `LightningLNbits` dans les tests (`tests/test_integration_backend.py`). Un tour complet fonctionne : 3 cotisations, confirmation, versement, démarrage du tour 2.
+
+Le croisement des deux codes, puis une relecture de sécurité indépendante, font apparaître **4 corrections nécessaires dans `backend/`** (des petits changements). Chaque correction est vérifiée par un test sur le vrai code du moteur.
 
 ---
 
@@ -12,7 +16,6 @@ Le croisement des deux codes, puis une relecture de sécurité indépendante, fo
 
 Aujourd'hui, `confirmer_paiement` se contente d'une préimage valide, et `/paiements/confirmation` est public. Quelqu'un qui a la clé « invoice » (elle est dans `.env` et visible dans l'interface LNbits) lit les préimages des factures impayées. Il les poste au backend, le tour devient « complet » et **la cagnotte est versée avec l'argent des autres tontines**.
 
-Test : `test_PROBLEME_C2_moteur_actuel_accepte_une_fausse_confirmation`.
 
 **Correction, en deux couches :**
 
@@ -42,7 +45,7 @@ def confirmation(d: Confirmation, x_jeton_pont: str = Header(default="")):
 ```
 `PONT_JETON_BACKEND` est généré par `scripts/regtest.py init` dans `lightning/.env`, que le backend charge.
 
-Test de la correction : `test_CORRIGE_C2_fausse_confirmation_refusee`.
+Test : `test_fausse_confirmation_refusee`.
 
 ---
 
@@ -50,7 +53,7 @@ Test de la correction : `test_CORRIGE_C2_fausse_confirmation_refusee`.
 
 **Problème.** `payer()` est idempotent sur `(adresse, montant, description)` : c'est ce qui empêche de verser deux fois. Or la description vaut `f"{t.nom} - cagnotte du tour {tour.numero}"`. Deux tontines nommées « Test », avec le même bénéficiaire, le même montant et le même numéro de tour, produisent donc la même clé. **La 2ᵉ cagnotte est marquée FAIT sans qu'aucun sat ne parte.** En démo, quand on recrée « Test » avec les mêmes adresses, c'est presque certain.
 
-Test : `test_PROBLEME_deux_tontines_homonymes_partagent_la_cle_de_versement`.
+Test : `test_tontines_homonymes_versees_separement`.
 
 **Correction (1 ligne, `_verser`)** : mettre l'identifiant unique de la tontine dans la description.
 ```python
@@ -63,7 +66,7 @@ preimage = self.lightning.payer(
 
 ## 2. 🟠 « Issue inconnue » affichée comme « échec », et blocage après une panne
 
-**Problème A.** `_verser` fait `except Exception` et passe en `ECHEC`. Mais `payer()` peut lever `VersementEnAttente` : le paiement est **parti** et son issue n'est pas encore connue. Le membre voit « échec » alors que les fonds sont en route. La relance est sans danger (l'adaptateur reprend le suivi au lieu de repayer, voir `test_relance_apres_issue_incertaine_ne_paie_pas_deux_fois`), mais l'affichage est faux.
+**Problème A.** `_verser` fait `except Exception` et passe en `ECHEC`. Mais `payer()` peut lever `VersementEnAttente` : le paiement est **parti** et son issue n'est pas encore connue. Le membre voit « échec » alors que les fonds sont en route. La relance est sans danger (l'adaptateur reprend le suivi au lieu de repayer, voir `test_relances_repetees_sans_double_paiement`), mais l'affichage est faux.
 
 **Problème B.** Après un redémarrage, un tour resté `EN_COURS` est bloqué : `relancer_versement` n'accepte que `ECHEC` (le commentaire « il faut vérifier à la main » le dit).
 
@@ -115,7 +118,7 @@ except ImportError:                     # LightningFactice seul
 
 **Problème.** Le portefeuille reçoit exactement la somme des cotisations, puis doit envoyer cette somme **plus** les frais de routage Lightning (et LNbits exige une réserve de frais). Sans marge, le versement est refusé avant tout envoi. Il n'y a aucun risque, mais il n'y a pas de versement non plus.
 
-Test : `test_PROBLEME_sans_reserve_de_frais_le_versement_echoue`.
+Test : `test_sans_reserve_de_frais_echec_sans_envoi`.
 
 **Décision prise** : le bénéficiaire reçoit **exactement** ce que les membres ont payé (c'est la promesse de la tontine). Le portefeuille garde une **réserve de frais** :
 - en regtest, `scripts/regtest.py init` la crée automatiquement (20 000 sats) ;

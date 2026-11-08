@@ -3,11 +3,10 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from tontine_lightning import LightningLNbits, Reglages
+from tontine_lightning import Facture, LightningLNbits, Reglages
 from tontine_lightning.lnbits import ClientLNbits
 from tontine_lightning.registre import RegistreVersements
 
-from .backend_fatou_lightning import Facture as FactureFatou
 from .faux_services import CLE_ADMIN, CLE_FACTURE, FauxLNbits, FauxPortefeuille
 
 
@@ -62,7 +61,7 @@ def ln(reglages: Reglages, lnbits: FauxLNbits, portefeuille: FauxPortefeuille, h
         client=ClientLNbits(reglages, http=http),
         registre=RegistreVersements(),
         http_lnurl=http_lnurl,
-        fabrique_facture=FactureFatou,
+        fabrique_facture=Facture,
         horloge=horloge,
         dormir=horloge.dormir,
     )

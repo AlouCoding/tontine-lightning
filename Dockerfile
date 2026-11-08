@@ -18,8 +18,8 @@ RUN pip install ".[pont]" \
 USER pont
 EXPOSE 8000
 
-HEALTHCHECK --interval=15s --timeout=5s --retries=5 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/sante', timeout=4)"
+HEALTHCHECK --interval=30s --timeout=5s --retries=5 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/vivant', timeout=4)"
 
 # --no-access-log : l'URL du webhook contient son jeton secret, elle ne doit pas finir dans les logs.
 CMD ["uvicorn", "tontine_lightning.pont.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]

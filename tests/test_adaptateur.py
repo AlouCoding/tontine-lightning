@@ -1,4 +1,4 @@
-"""Tests de LightningLNbits contre l'interface du moteur de Fatou."""
+"""Tests unitaires de LightningLNbits (le moteur réel est testé dans test_integration_backend.py)."""
 
 from __future__ import annotations
 
@@ -14,8 +14,7 @@ from tontine_lightning import (
 )
 from tontine_lightning.erreurs import ErreurLNbits
 
-from .backend_fatou_lightning import Facture as FactureFatou
-from .backend_fatou_lightning import preimage_valide as preimage_valide_fatou
+from tontine_lightning import Facture, preimage_valide
 from .faux_services import FauxLNbits, FauxPortefeuille
 
 BENEF = "benef@wallet.test"
@@ -23,9 +22,9 @@ DESC = "Cagnotte tontine t42 tour 1"
 
 
 # =========================================================== creer_facture
-def test_creer_facture_respecte_interface_fatou(ln: LightningLNbits, lnbits: FauxLNbits) -> None:
+def test_creer_facture_respecte_interface(ln: LightningLNbits, lnbits: FauxLNbits) -> None:
     f = ln.creer_facture(1520, "Cotisation t42 tour 1 - Aminata")
-    assert isinstance(f, FactureFatou)  # le moteur peut faire asdict() dessus
+    assert isinstance(f, Facture)  # dataclass : le moteur peut faire asdict() dessus
     assert f.payment_request.startswith("lnbcrt15200n")  # regtest, 1520 sats
     corps = lnbits.derniere_creation
     assert corps["out"] is False and corps["unit"] == "sat" and corps["amount"] == 1520
@@ -49,7 +48,7 @@ def test_creer_facture_montants_invalides(ln: LightningLNbits, montant) -> None:
 def test_payer_vers_adresse_lightning(ln: LightningLNbits, lnbits: FauxLNbits) -> None:
     preimage = ln.payer(BENEF, 4560, DESC)
     versement = next(iter(ln.registre._db.execute("SELECT payment_hash FROM versements")))
-    assert preimage_valide_fatou(preimage, versement[0])  # vérifiable par le moteur de Fatou
+    assert preimage_valide(preimage, versement[0])
     assert lnbits.appels_paiement == 1
 
 

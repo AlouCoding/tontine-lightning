@@ -73,6 +73,11 @@ def creer_app(reglages: ReglagesPont, relais: Relais | None = None, annuaire: Re
         taches.add_task(relais.traiter, payment_hash)
         return {"recu": True}
 
+    @app.get("/vivant")
+    async def vivant() -> dict:
+        """Vérification légère pour Docker : ne contacte ni LNbits ni le backend (pas de bruit dans leurs logs)."""
+        return {"vivant": True}
+
     @app.get("/sante")
     async def sante() -> dict:
         compte = relais.stock.compter()

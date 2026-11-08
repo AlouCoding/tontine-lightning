@@ -4,7 +4,7 @@
 **Rôle :** nœud Lightning et LNbits, réception des cotisations, versement de la cagnotte, sécurité des fonds.
 
 > Concepts Bitcoin/Lightning, flux détaillés et modèle de menaces : **[ARCHITECTURE.md](ARCHITECTURE.md)**
-> Branchement avec le moteur et 4 corrections à faire dans `backend/`, dont une faille critique : **[INTEGRATION.md](INTEGRATION.md)**
+> Branchement avec le moteur et les 4 corrections (appliquées) : **[INTEGRATION.md](INTEGRATION.md)**
 
 ## Ce qu'il y a dedans
 
@@ -15,7 +15,7 @@
 | `docker-compose.yml` | vrai réseau Bitcoin + Lightning en local (regtest) : bitcoind, 2 nœuds LND, LNbits, pont |
 | `docker-compose.mainnet.yml` | démo avec de vrais sats (LNbits + phoenixd) |
 | `scripts/regtest.py` | initialise le réseau, simule les membres, vérifie tout de bout en bout |
-| `tests/` | 76 tests : vraies factures BOLT11 signées, et le vrai moteur de Fatou branché sur l'adaptateur |
+| `tests/` | 74 tests : vraies factures BOLT11 signées, et **le vrai `backend/` du dépôt** branché sur l'adaptateur (aucune copie) |
 
 ## Démarrage (regtest, ~5 min)
 
@@ -26,7 +26,7 @@ cd lightning
 python -m venv .venv
 .venv\Scripts\activate            # Windows   (macOS/Linux : source .venv/bin/activate)
 pip install -e ".[dev]"
-pytest                             # 76 tests, sans réseau
+pytest                             # 74 tests, sans réseau (7 ignorés hors du dépôt)
 
 python scripts/regtest.py init     # conteneurs, minage, canaux, portefeuille LNbits, .env, pont
 python scripts/regtest.py verifier # VRAIE cotisation + VRAI versement sur la pile Docker
@@ -37,6 +37,7 @@ python scripts/regtest.py verifier # VRAIE cotisation + VRAI versement sur la pi
 | Commande | Usage |
 |---|---|
 | `python scripts/regtest.py payer <bolt11>` | un « membre » paie le QR affiché par le frontend |
+| `python scripts/demo_tour.py` | **démo complète** via l'API du backend (lancé en mode LNbits) : création, inscriptions, tirage, 3 paiements Lightning, versement |
 | `python scripts/regtest.py soldes` | soldes des canaux et du portefeuille de la tontine |
 | `python scripts/regtest.py miner 6` | mine 6 blocs |
 | `docker compose logs -f pont` | voir les cotisations relayées au backend |
@@ -44,43 +45,20 @@ python scripts/regtest.py verifier # VRAIE cotisation + VRAI versement sur la pi
 
 En regtest, **toute adresse `nom@regtest.local`** est une adresse Lightning valide : le pont la sert et le nœud `lnd-membres` reçoit les fonds. Utilisez-les comme `adresse_lightning` lors de l'inscription des membres.
 
-## Brancher le backend (à faire avec Fatou)
+## Brancher le backend
 
-**1.** Dans `backend/requirements.txt`, ajouter :
+✅ Le branchement est fait côté backend (les 4 corrections d'[INTEGRATION.md](INTEGRATION.md) sont appliquées). Une fois le réseau regtest démarré (`scripts/regtest.py init`), suivre la section **« Lancer le backend avec le vrai Lightning »** du [README principal](../README.md). En résumé, sous PowerShell :
+
 ```
--e ../lightning
-```
-
-**2.** Dans `backend/app/main.py`, remplacer la création du moteur :
-```python
-import os
-from .lightning import Facture, LightningFactice
-
-
-def service_lightning():
-    """LNbits si LIGHTNING_MODE=lnbits, sinon le faux service (tests, dev sans Docker)."""
-    if os.environ.get("LIGHTNING_MODE") == "lnbits":
-        from tontine_lightning import LightningLNbits
-        ln = LightningLNbits.depuis_env(fabrique_facture=Facture)  # renvoie SA classe Facture
-        ln.reprendre_versements_en_cours()  # règle les versements interrompus par une panne
-        return ln
-    return LightningFactice()
-
-
-moteur = Moteur(lightning=service_lightning(), source_cours=SourceCours(),
-                stockage=Stockage(os.environ.get("TONTINE_DB", "tontine.db")))
-```
-
-**3.** Appliquer les 4 corrections de [INTEGRATION.md](INTEGRATION.md), dont la n° 0 (faille critique) : vérification `cotisation_recue()` dans `confirmer_paiement`, et jeton du pont sur `/paiements/confirmation`.
-
-**4.** Lancer le backend avec la config Lightning :
-```bash
-# Windows PowerShell
+cd backend
+python -m pip install -r requirements-lightning.txt   # installe aussi ce paquet (-e ../lightning)
 $env:LIGHTNING_MODE="lnbits"; $env:LIGHTNING_ENV_FILE="..\lightning\.env"
 python -m uvicorn app.main:app --reload
 ```
 
-Sans `LIGHTNING_MODE`, rien ne change : les tests de Fatou continuent d'utiliser `LightningFactice`.
+Le backend lit les clés LNbits et `PONT_JETON_BACKEND` dans `lightning/.env`, et refuse de démarrer sans ce jeton. Sans `LIGHTNING_MODE`, il garde son faux Lightning (`LightningFactice`).
+
+Pour suivre les cotisations relayées : `docker compose logs -f pont` (depuis `lightning/`).
 
 ### Contrat avec le moteur (important)
 
