@@ -1,0 +1,58 @@
+# Démo MAINNET (vrais sats, petites sommes) : LNbits + pont, sans annuaire regtest.
+#
+# Source de fonds recommandée : phoenixd (ACINQ), un nœud Lightning auto-géré qui gère seul
+# sa liquidité. Installation : https://phoenix.acinq.co/server  -> lancé sur la machine hôte (port 9740).
+# ATTENTION : à la 1re réception, phoenixd ouvre un canal et prélève des frais (vérifier les
+# montants actuels sur leur documentation avant la démo).
+#
+#   cp .env.mainnet.example .env.mainnet   (puis remplir)
+#   docker compose -f docker-compose.mainnet.yml --env-file .env.mainnet up -d --build
+
+name: tontine-lightning-mainnet
+
+services:
+  lnbits:
+    image: ${LNBITS_IMAGE:-lnbits/lnbits:latest}
+    environment:
+      LNBITS_BACKEND_WALLET_CLASS: ${LNBITS_BACKEND_WALLET_CLASS:-PhoenixdWallet}
+      PHOENIXD_API_ENDPOINT: ${PHOENIXD_API_ENDPOINT:-http://host.docker.internal:9740/}
+      PHOENIXD_API_PASSWORD: ${PHOENIXD_API_PASSWORD:-}
+      LNBITS_DATA_FOLDER: /app/data
+      LNBITS_ADMIN_UI: "false"
+      LNBITS_CALLBACK_ALLOW_PRIVATE_IPS: "true"
+      # Par défaut, LNbits n'accepte que des webhooks vers un domaine avec un point (« x.y ») :
+      # « http://pont:8000 » serait refusé dès la création de la facture (400). Vérifié dans LNbits 1.6.
+      LNBITS_CALLBACK_URL_RULES: '["http://pont:8000"]'  # webhook vers le pont, sur le réseau Docker interne uniquement
+      LNBITS_RESERVE_FEE_MIN: "2000"
+      LNBITS_RESERVE_FEE_PERCENT: "1.0"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - lnbits:/app/data
+    ports:
+      - "127.0.0.1:5000:5000"
+    restart: unless-stopped
+
+  pont:
+    build: .
+    profiles: ["pont"]
+    depends_on:
+      - lnbits
+    environment:
+      LNBITS_URL: http://lnbits:5000
+      LNBITS_INVOICE_KEY: ${LNBITS_INVOICE_KEY:-}
+      PONT_JETON_WEBHOOK: ${PONT_JETON_WEBHOOK:-}
+      PONT_JETON_BACKEND: ${PONT_JETON_BACKEND:-}
+      BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:8000}
+      ANNUAIRE_REGTEST: "false"  # jamais d'annuaire de test en mainnet
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - pont:/donnees
+    ports:
+      - "127.0.0.1:8001:8000"
+    restart: unless-stopped
+
+volumes:
+  lnbits:
+  pont:

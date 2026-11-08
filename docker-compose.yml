@@ -1,0 +1,156 @@
+# Pile Lightning RÉGTEST de Tontine Lightning : un vrai réseau Bitcoin + Lightning, en local.
+#
+#   bitcoind      chaîne Bitcoin privée (on mine les blocs nous-mêmes)
+#   lnd-tontine   nœud Lightning de la tontine (reçoit les cotisations, verse la cagnotte)
+#   lnd-membres   nœud Lightning qui joue les portefeuilles des membres et bénéficiaires
+#   lnbits        API HTTP au-dessus de lnd-tontine (comptes, clés, webhooks)
+#   pont          webhooks LNbits -> backend + annuaire d'adresses nom@regtest.local
+#
+# Démarrage : docker compose up -d   puis   python scripts/regtest.py init
+# Seuls LNbits (5000) et le pont (8001) sont exposés, et uniquement sur 127.0.0.1.
+
+name: tontine-lightning
+
+services:
+  bitcoind:
+    image: polarlightning/bitcoind:29.0
+    command:
+      - bitcoind
+      - -regtest=1
+      - -server=1
+      - -txindex=1
+      - -rpcuser=tontine
+      - -rpcpassword=tontine-regtest  # regtest uniquement : aucune valeur réelle
+      - -rpcbind=0.0.0.0
+      - -rpcallowip=0.0.0.0/0
+      - -rpcport=18443
+      - -zmqpubrawblock=tcp://0.0.0.0:28334
+      - -zmqpubrawtx=tcp://0.0.0.0:28335
+      - -fallbackfee=0.0002
+      - -dnsseed=0
+      - -listenonion=0
+    volumes:
+      - bitcoind:/home/bitcoin/.bitcoin
+    healthcheck:
+      test: ["CMD", "bitcoin-cli", "-regtest", "-rpcport=18443", "-rpcuser=tontine", "-rpcpassword=tontine-regtest", "getblockchaininfo"]
+      interval: 5s
+      retries: 30
+    restart: unless-stopped
+
+  lnd-tontine:
+    image: polarlightning/lnd:0.19.3-beta
+    command:
+      - lnd
+      - --noseedbackup  # regtest : pas de phrase de récupération. JAMAIS en mainnet.
+      - --alias=tontine
+      - --externalip=lnd-tontine
+      - --tlsextradomain=lnd-tontine
+      - --listen=0.0.0.0:9735
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --trickledelay=5000
+      - --bitcoin.active
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoind.rpchost=bitcoind:18443
+      - --bitcoind.rpcuser=tontine
+      - --bitcoind.rpcpass=tontine-regtest
+      - --bitcoind.zmqpubrawblock=tcp://bitcoind:28334
+      - --bitcoind.zmqpubrawtx=tcp://bitcoind:28335
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    volumes:
+      - lnd-tontine:/home/lnd/.lnd
+    healthcheck: &lnd-sante
+      test: ["CMD-SHELL", "lncli --lnddir=/home/lnd/.lnd --network=regtest getinfo > /dev/null"]
+      interval: 5s
+      retries: 30
+    restart: unless-stopped
+
+  lnd-membres:
+    image: polarlightning/lnd:0.19.3-beta
+    command:
+      - lnd
+      - --noseedbackup
+      - --alias=membres
+      - --externalip=lnd-membres
+      - --tlsextradomain=lnd-membres
+      - --listen=0.0.0.0:9735
+      - --rpclisten=0.0.0.0:10009
+      - --restlisten=0.0.0.0:8080
+      - --trickledelay=5000
+      - --bitcoin.active
+      - --bitcoin.regtest
+      - --bitcoin.node=bitcoind
+      - --bitcoind.rpchost=bitcoind:18443
+      - --bitcoind.rpcuser=tontine
+      - --bitcoind.rpcpass=tontine-regtest
+      - --bitcoind.zmqpubrawblock=tcp://bitcoind:28334
+      - --bitcoind.zmqpubrawtx=tcp://bitcoind:28335
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    volumes:
+      - lnd-membres:/home/lnd/.lnd
+    healthcheck: *lnd-sante
+    restart: unless-stopped
+
+  lnbits:
+    image: ${LNBITS_IMAGE:-lnbits/lnbits:latest}
+    depends_on:
+      lnd-tontine:
+        condition: service_healthy
+    environment:
+      LNBITS_BACKEND_WALLET_CLASS: LndRestWallet
+      LND_REST_ENDPOINT: https://lnd-tontine:8080
+      LND_REST_CERT: /lnd/tls.cert
+      LND_REST_MACAROON: /lnd/data/chain/bitcoin/regtest/admin.macaroon
+      LNBITS_DATA_FOLDER: /app/data
+      # Config par variables d'environnement (et non via l'interface admin) : reproductible.
+      LNBITS_ADMIN_UI: "false"
+      # Le pont est sur le réseau Docker (IP privée) : LNbits bloque ces webhooks par défaut.
+      LNBITS_CALLBACK_ALLOW_PRIVATE_IPS: "true"
+      # Par défaut, LNbits n'accepte que des webhooks vers un domaine avec un point (« x.y ») :
+      # « http://pont:8000 » serait refusé dès la création de la facture (400). Vérifié dans LNbits 1.6.
+      LNBITS_CALLBACK_URL_RULES: '["http://pont:8000"]'
+      LNBITS_RESERVE_FEE_MIN: "2000"
+      LNBITS_RESERVE_FEE_PERCENT: "1.0"
+    volumes:
+      - lnd-tontine:/lnd:ro
+      - lnbits:/app/data
+    ports:
+      - "127.0.0.1:5000:5000"
+    restart: unless-stopped
+
+  pont:
+    build: .
+    profiles: ["pont"]  # démarré par « scripts/regtest.py init » une fois les clés LNbits créées
+    depends_on:
+      - lnbits
+    environment:
+      LNBITS_URL: http://lnbits:5000
+      LNBITS_INVOICE_KEY: ${LNBITS_INVOICE_KEY:-}
+      PONT_JETON_WEBHOOK: ${PONT_JETON_WEBHOOK:-}
+      PONT_JETON_BACKEND: ${PONT_JETON_BACKEND:-}
+      BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:8000}
+      ANNUAIRE_REGTEST: "true"
+      ANNUAIRE_URL_PUBLIQUE: http://127.0.0.1:8001
+      LND_MEMBRES_REST: https://lnd-membres:8080
+      LND_MEMBRES_CERT: /lnd-membres/tls.cert
+      LND_MEMBRES_MACAROON: /lnd-membres/data/chain/bitcoin/regtest/invoice.macaroon
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # pour joindre le backend lancé hors Docker
+    volumes:
+      - lnd-membres:/lnd-membres:ro
+      - pont:/donnees
+    ports:
+      - "127.0.0.1:8001:8000"
+    restart: unless-stopped
+
+volumes:
+  bitcoind:
+  lnd-tontine:
+  lnd-membres:
+  lnbits:
+  pont:
