@@ -192,3 +192,22 @@ def test_versement_via_annuaire_regtest(monkeypatch: pytest.MonkeyPatch, lnbits:
         preimage = ln.payer("aminata@regtest.local", 3000, "Cagnotte t1 tour 1")
     assert len(preimage) == 64 and lnbits.appels_paiement == 1
     assert vus["url"] == "https://lnd-membres:8080/v1/invoices" and vus["macaroon"] == "0201"
+
+
+def test_annuaire_callback_suit_l_hote_de_la_requete(tmp_path) -> None:
+    """Le callback LNURL doit être joignable par l'appelant, qu'il soit hors Docker ou dedans.
+
+    Régression : avec une URL fixe (127.0.0.1:18001), le backend lancé DANS Docker recevait un
+    callback pointant vers son propre conteneur, et chaque versement échouait (Connection refused).
+    """
+    r_pont = ReglagesPont("http://lnbits:5000", CLE_FACTURE, "http://backend:8000", JETON, ":memory:", 0)
+    app = creer_app(
+        r_pont,
+        annuaire=ReglagesAnnuaire("http://127.0.0.1:18001", "https://lnd-membres:8080", "/lnd/tls.cert", str(tmp_path / "m")),
+    )
+    with TestClient(app, base_url="http://pont:8000") as dans_docker:
+        cb = dans_docker.get("/.well-known/lnurlp/bineta").json()["callback"]
+    assert cb == "http://pont:8000/lnurlp/bineta/callback"
+    with TestClient(app, base_url="http://127.0.0.1:18001") as hors_docker:
+        cb = hors_docker.get("/.well-known/lnurlp/bineta").json()["callback"]
+    assert cb == "http://127.0.0.1:18001/lnurlp/bineta/callback"

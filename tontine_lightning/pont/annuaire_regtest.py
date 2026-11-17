@@ -16,14 +16,17 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 
 _NOM = re.compile(r"^[a-z0-9._+-]{1,64}$")
 
 
 @dataclass(frozen=True)
 class ReglagesAnnuaire:
-    url_publique: str  # base vue par le backend, ex. http://127.0.0.1:18001
+    # Conservé pour compatibilité, plus utilisé : le callback est construit à partir de l'adresse par
+    # laquelle on a joint le pont. Le backend peut tourner hors Docker (127.0.0.1:18001) ou dans Docker
+    # (pont:8000) ; une URL fixe ne marche que pour l'un des deux.
+    url_publique: str
     lnd_rest: str  # ex. https://lnd-membres:8080
     lnd_cert: str  # chemin du tls.cert
     lnd_macaroon: str  # chemin d'invoice.macaroon (ne permet que de créer des factures)
@@ -43,11 +46,13 @@ def creer_routeur(r: ReglagesAnnuaire) -> APIRouter:
         return nom
 
     @routeur.get("/.well-known/lnurlp/{nom}")
-    def lnurlp(nom: str) -> dict:
+    def lnurlp(nom: str, request: Request) -> dict:
         nom = verifier_nom(nom)
+        # Même hôte que la requête reçue : joignable par celui qui vient de nous joindre.
+        base = str(request.base_url).rstrip("/")
         return {
             "tag": "payRequest",
-            "callback": f"{r.url_publique}/lnurlp/{nom}/callback",
+            "callback": f"{base}/lnurlp/{nom}/callback",
             "minSendable": 1_000,
             "maxSendable": 1_000_000_000,
             "metadata": metadata_pour(nom),
