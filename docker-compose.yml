@@ -6,9 +6,9 @@
 #   lnbits        API HTTP au-dessus de lnd-tontine (comptes, clés, webhooks)
 #   pont          webhooks LNbits -> backend + annuaire d'adresses nom@regtest.local
 #
-# Démarrage : docker compose up -d   puis   python scripts/regtest.py init
-# Seuls LNbits (LNBITS_PORT, 5000) et le pont (PONT_PORT, 18001) sont exposés, et uniquement sur 127.0.0.1.
-# Port déjà pris par un autre projet ? Changer LNBITS_PORT / PONT_PORT dans .env.
+# Première initialisation : python scripts/regtest.py init ; démarrages suivants : docker compose --profile pont --profile app up -d
+# LNbits, le pont, l'API et le front sont exposés uniquement sur 127.0.0.1.
+# Ports : LNBITS_PORT, PONT_PORT, BACKEND_PORT et FRONTEND_PORT dans .env.
 
 name: tontine-lightning
 
@@ -110,6 +110,10 @@ services:
       LNBITS_DATA_FOLDER: /app/data
       # Config par variables d'environnement (et non via l'interface admin) : reproductible.
       LNBITS_ADMIN_UI: "false"
+      # Regtest uniquement : le portefeuille initial est créé par regtest.py.
+      # Le port hôte est limité à 127.0.0.1 ; ne pas activer ceci sur mainnet.
+      LNBITS_ALLOW_NEW_ACCOUNTS: "true"
+      AUTH_ALLOWED_METHODS: "user-id-only"
       # Le pont est sur le réseau Docker (IP privée) : LNbits bloque ces webhooks par défaut.
       LNBITS_CALLBACK_ALLOW_PRIVATE_IPS: "true"
       # Par défaut, LNbits n'accepte que des webhooks vers un domaine avec un point (« x.y ») :
@@ -134,7 +138,7 @@ services:
       LNBITS_INVOICE_KEY: ${LNBITS_INVOICE_KEY:-}
       PONT_JETON_WEBHOOK: ${PONT_JETON_WEBHOOK:-}
       PONT_JETON_BACKEND: ${PONT_JETON_BACKEND:-}
-      BACKEND_URL: ${BACKEND_URL:-http://host.docker.internal:8000}
+      BACKEND_URL: http://backend:8000
       ANNUAIRE_REGTEST: "true"
       ANNUAIRE_URL_PUBLIQUE: http://127.0.0.1:${PONT_PORT:-18001}
       LND_MEMBRES_REST: https://lnd-membres:8080
@@ -149,9 +153,51 @@ services:
       - "127.0.0.1:${PONT_PORT:-18001}:8000"
     restart: unless-stopped
 
+  backend:
+    build:
+      context: ..
+      dockerfile: backend/Dockerfile
+    profiles: ["app"]
+    depends_on:
+      pont:
+        condition: service_healthy
+    environment:
+      LIGHTNING_MODE: lnbits
+      LIGHTNING_RESEAU: regtest
+      LNBITS_URL: http://lnbits:5000
+      LNBITS_INVOICE_KEY: ${LNBITS_INVOICE_KEY:-}
+      LNBITS_ADMIN_KEY: ${LNBITS_ADMIN_KEY:-}
+      LIGHTNING_WEBHOOK_URL: ${LIGHTNING_WEBHOOK_URL:-}
+      PONT_JETON_BACKEND: ${PONT_JETON_BACKEND:-}
+      LNURL_DOMAINES_LOCAUX: regtest.local=http://pont:8000
+      LNURL_AUTORISER_RESEAU_PRIVE: "true"
+      LIGHTNING_REGISTRE: /data/versements-regtest.sqlite3
+      TONTINE_DB: /data/tontine.db
+      NOSTR_MODE: ${NOSTR_MODE:-}
+    volumes:
+      - backend-data:/data
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_URL: ${FRONTEND_API_URL:-http://127.0.0.1:8000}
+    profiles: ["app"]
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:80"
+    restart: unless-stopped
+
 volumes:
   bitcoind:
   lnd-tontine:
   lnd-membres:
   lnbits:
   pont:
+  backend-data:

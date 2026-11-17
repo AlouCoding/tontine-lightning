@@ -215,7 +215,19 @@ def cmd_init(_: argparse.Namespace) -> None:
     if cle_valide:
         ok("portefeuille existant réutilisé")
     else:
-        portefeuille = http_json("POST", f"{LNBITS}/api/v1/account", {"name": "Tontine"})
+        try:
+            portefeuille = http_json("POST", f"{LNBITS}/api/v1/account", {"name": "Tontine"})
+        except urllib.error.HTTPError as exc:
+            corps = exc.read().decode("utf-8", errors="replace")
+            if exc.code != 403 or "Anonymous account creation is disabled" not in corps:
+                raise RuntimeError(f"Création du portefeuille LNbits refusée ({exc.code}) : {corps}") from exc
+
+            # LNbits 1.7+ disables registration during its first migration. The
+            # regtest-only environment settings take effect after that migration.
+            etape("LNbits vient de terminer sa première migration ; redémarrage pour appliquer la configuration regtest")
+            lancer_visible(["docker", "compose", "restart", "lnbits"])
+            attendre(lambda: _OUVREUR.open(LNBITS, timeout=5).status == 200, "LNbits après redémarrage", 180)
+            portefeuille = http_json("POST", f"{LNBITS}/api/v1/account", {"name": "Tontine"})
         cle_facture, cle_admin = portefeuille["inkey"], portefeuille["adminkey"]
         ok("portefeuille « Tontine » créé")
 
@@ -256,7 +268,16 @@ def cmd_init(_: argparse.Namespace) -> None:
     attendre(lambda: http_json("GET", f"{PONT}/sante"), "pont", 120)
     ok(f"pont opérationnel sur {PONT}")
 
-    print("\nPrêt. Étape suivante : python scripts/regtest.py verifier")
+    etape("Démarrage du backend et du frontend")
+    lancer_visible(["docker", "compose", "--profile", "pont", "--profile", "app",
+                    "up", "-d", "--build", "backend", "frontend"])
+    attendre(lambda: _OUVREUR.open(f"http://127.0.0.1:{_port('BACKEND_PORT', '8000')}/openapi.json",
+                                  timeout=5).status == 200,
+             "backend", 120)
+    attendre(lambda: _OUVREUR.open(f"http://127.0.0.1:{_port('FRONTEND_PORT', '5173')}/",
+                                  timeout=5).status == 200,
+             "frontend", 120)
+    ok(f"application prête sur http://127.0.0.1:{_port('FRONTEND_PORT', '5173')}")
 
 
 def _canal_initie_par(source: str, cible_pub: str) -> bool:

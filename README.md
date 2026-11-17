@@ -77,19 +77,34 @@ Le détail est dans [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Démarrage rapide (regtest, ~5 min)
 
-Prérequis : Docker Desktop lancé, Python ≥ 3.10.
+Prérequis : Docker Desktop lancé et Python ≥ 3.10 pour le script d'initialisation. Les services applicatifs, leurs dépendances et leurs bibliothèques s'exécutent dans Docker.
+
+```bash
+python scripts/regtest.py init     # initialise le regtest et démarre toute l'application
+```
+
+Ouvrir ensuite le front sur http://127.0.0.1:5173, l'API sur http://127.0.0.1:8000/docs ou LNbits sur http://127.0.0.1:5000. Le Compose regtest autorise la création initiale du portefeuille uniquement pour ce réseau local, dont les ports publiés sont liés à `127.0.0.1`. Certaines versions récentes de LNbits désactivent cette option pendant leur première migration ; `regtest.py init` redémarre alors LNbits une fois et réessaie. Le mode d'authentification par identifiant est activé pour satisfaire le contrôle de création de compte de LNbits. Ces réglages ne doivent pas être repris pour mainnet.
+
+`init` peut être relancé sans risque. Il écrit `.env` (ignoré par Git). Les ports se changent dans `.env` (`LNBITS_PORT`, `PONT_PORT`, `BACKEND_PORT`, `FRONTEND_PORT`). Pour les démarrages suivants, depuis `lightning` :
+
+```powershell
+docker compose --profile pont --profile app up -d
+```
+
+Les volumes Docker conservent les données. Pour arrêter sans les effacer :
+
+```powershell
+docker compose --profile pont --profile app stop
+```
+
+Pour lancer la vérification Lightning complète depuis l'hôte, installez les dépendances de développement puis lancez `python scripts/regtest.py verifier` comme ci-dessous. Elle n'est pas nécessaire pour démarrer le front.
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate             # Windows   (macOS/Linux : source .venv/bin/activate)
 pip install -e ".[dev]"
-pytest                             # tests unitaires, sans réseau
-
-python scripts/regtest.py init     # conteneurs, minage, canaux, portefeuille LNbits, .env, pont
 python scripts/regtest.py verifier # vraie cotisation + vrai versement sur le réseau local
 ```
-
-`init` peut être relancé sans risque. Il écrit `.env` (ignoré par Git). Les ports se changent dans `.env` (`LNBITS_PORT`, `PONT_PORT`).
 
 | Commande | Usage |
 |---|---|

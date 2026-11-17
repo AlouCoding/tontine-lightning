@@ -27,9 +27,11 @@ _OUVREUR = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 MEMBRES = [("Awa", "awa@regtest.local"), ("Bineta", "bineta@regtest.local"), ("Coumba", "coumba@regtest.local")]
 
 
-def api(methode: str, url: str, corps: dict | None = None) -> dict:
+def api(methode: str, url: str, corps: dict | None = None, jeton: str | None = None) -> dict:
     requete = urllib.request.Request(url, method=methode, data=json.dumps(corps).encode() if corps is not None else None)
     requete.add_header("Content-Type", "application/json")
+    if jeton:
+        requete.add_header("X-Jeton", jeton)  # lecture et factures réservées aux membres (ou à l'organisateur)
     try:
         with _OUVREUR.open(requete, timeout=60) as rep:
             return json.loads(rep.read())
@@ -70,7 +72,7 @@ def main() -> None:
     etape("4. Chaque membre scanne son QR code et paie en Lightning")
     total = 0
     for membre_id, nom in noms.items():
-        c = api("POST", f"{base}/tontines/{tid}/membres/{membre_id}/facture")
+        c = api("POST", f"{base}/tontines/{tid}/membres/{membre_id}/facture", jeton=jeton)
         total += c["montant_sats"]
         lncli("lnd-membres", "payinvoice", "--force", c["payment_request"])
         ok(f"{nom} a payé {c['montant_sats']} sats")
@@ -78,7 +80,7 @@ def main() -> None:
     etape("5. Le pont confirme chaque paiement au backend, qui verse la cagnotte")
 
     def tour_verse():
-        tour = api("GET", f"{base}/tontines/{tid}")["tours"][0]
+        tour = api("GET", f"{base}/tontines/{tid}", jeton=jeton)["tours"][0]
         statuts = [c["statut"] for c in tour["cotisations"].values()]
         print(f"    … cotisations : {statuts.count('paye')}/{len(statuts)} payées, versement : {tour['versement_statut']}", flush=True)
         return tour if tour["versement_statut"] == "fait" else None
@@ -88,7 +90,7 @@ def main() -> None:
     assert tour["versement_sats"] == total
 
     etape("6. Journal public de la tontine (ce que le registre Nostr publiera)")
-    for e in api("GET", f"{base}/tontines/{tid}/evenements"):
+    for e in api("GET", f"{base}/tontines/{tid}/evenements", jeton=jeton):
         print(f"    #{e['numero']:>2} {e['type']}")
 
     print("\nTour complet réussi : création, inscriptions, tirage, 3 paiements Lightning, confirmation par le pont, versement.")
