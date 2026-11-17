@@ -203,3 +203,19 @@ def test_refus_4xx_lnbits_est_un_echec_certain(ln: LightningLNbits, lnbits: Faux
     lnbits.facture_beneficiaire = facture_non_enregistree  # type: ignore[method-assign]
     with pytest.raises(VersementEchoue, match="refusé"):
         ln.payer(BENEF, 4560, DESC)
+
+
+def test_facture_valable_une_heure_par_defaut(ln: LightningLNbits, lnbits: FauxLNbits) -> None:
+    """Volatilité : le montant en sats est figé à la création, donc la facture doit vivre peu de temps."""
+    ln.creer_facture(1000, "Cotisation")
+    assert lnbits.derniere_creation["expiry"] == 3600
+
+
+def test_expiration_reglable_par_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tontine_lightning import Reglages
+
+    for cle, val in {"LNBITS_URL": "http://x", "LNBITS_INVOICE_KEY": "i", "LNBITS_ADMIN_KEY": "a"}.items():
+        monkeypatch.setenv(cle, val)
+    assert Reglages.depuis_env().expiration_facture_s == 3600
+    monkeypatch.setenv("LIGHTNING_EXPIRATION_FACTURE_S", "900")
+    assert Reglages.depuis_env().expiration_facture_s == 900

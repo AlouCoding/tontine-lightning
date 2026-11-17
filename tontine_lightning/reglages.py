@@ -65,8 +65,9 @@ class Reglages:
     max_versement_sats: int = 500_000
     frais_max_pourcent: float = 1.0
     frais_min_sats: int = 10
-    # Le moteur réutilise la même facture jusqu'au paiement : elle doit vivre au moins le délai du tour.
-    expiration_facture_s: int = 7 * 86_400
+    # Facture courte : le montant en sats est figé à sa création, donc plus elle vit longtemps, plus le
+    # prix du Bitcoin peut bouger. Le moteur recrée une facture expirée au cours du moment.
+    expiration_facture_s: int = 3600
     # Le moteur appelle payer() en tenant son verrou global : on n'attend pas longtemps.
     delai_suivi_versement_s: float = 10.0
     # Un versement réservé mais inconnu de LNbits depuis plus longtemps que ce seuil n'est jamais parti.
@@ -113,7 +114,7 @@ class Reglages:
             max_versement_sats=int(os.environ.get("LIGHTNING_MAX_VERSEMENT_SATS", "500000")),
             frais_max_pourcent=float(os.environ.get("LIGHTNING_FRAIS_MAX_POURCENT", "1.0")),
             frais_min_sats=int(os.environ.get("LIGHTNING_FRAIS_MIN_SATS", "10")),
-            expiration_facture_s=int(os.environ.get("LIGHTNING_EXPIRATION_FACTURE_S", str(7 * 86_400))),
+            expiration_facture_s=int(os.environ.get("LIGHTNING_EXPIRATION_FACTURE_S", "3600")),
             delai_suivi_versement_s=float(os.environ.get("LIGHTNING_DELAI_SUIVI_S", "10")),
             seuil_abandon_s=float(os.environ.get("LIGHTNING_SEUIL_ABANDON_S", "120")),
             # Chemin absolu stable : le registre ne doit pas dépendre du dossier de lancement.

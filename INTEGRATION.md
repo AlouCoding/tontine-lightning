@@ -143,7 +143,7 @@ moteur.reprendre_versements()   # après la correction n° 2
 |---|---|---|
 | `_verser` appelle `payer()` en tenant le verrou global du moteur | pendant un versement (≤ 10 s de suivi), les autres requêtes de l'API attendent | verser hors verrou, via une tâche de fond. Pour la démo, le délai a été réduit à 10 s et le pont attend jusqu'à 45 s |
 | Un membre **exclu** paie quand même son ancienne facture | `confirmer_paiement` répond « Facture inconnue » et les fonds restent sur le portefeuille | rembourser à la main, ou ne pas retirer le hash de `_factures` et le rembourser automatiquement |
-| La facture est réutilisée jusqu'au paiement | elle doit vivre au moins le délai du tour : l'expiration est maintenant de **7 jours** par défaut (`LIGHTNING_EXPIRATION_FACTURE_S`). Si une tontine a `delai_jours > 7`, augmenter cette valeur ou régénérer les factures expirées | régénérer si expirée, en gardant l'ancien hash connu |
+| Durée de vie des factures | ✅ réglé : **1 heure** (`LIGHTNING_EXPIRATION_FACTURE_S=3600`), et le moteur recrée une facture expirée au cours du moment. Le montant en sats suit donc le prix du Bitcoin à une heure près | voir le document sur la volatilité |
 | Plafond de versement à 500 000 sats par défaut | une grosse tontine (10 × 50 000 FCFA ≈ 850 000 sats) serait refusée | ajuster `LIGHTNING_MAX_VERSEMENT_SATS` au besoin réel ; le garder bas pour la démo mainnet (20 000) |
 | Backend lancé hors Docker sous **Linux** | le pont le joint via `host.docker.internal` : uvicorn doit écouter sur `0.0.0.0`, donc il est visible sur le réseau local | grâce à la correction n° 0, une requête venue du réseau ne peut plus confirmer de faux paiement. Sous Windows/macOS (Docker Desktop), `127.0.0.1` suffit |
 
