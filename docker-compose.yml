@@ -173,9 +173,15 @@ services:
       LNURL_AUTORISER_RESEAU_PRIVE: "true"
       LIGHTNING_REGISTRE: /data/versements-regtest.sqlite3
       TONTINE_DB: /data/tontine.db
+      # Registre Nostr : NOSTR_MODE=actif dans lightning/.env, et la clé dans nostr/.env
+      # (créée par « python nostr/generer_secrets.py », jamais copiée dans l'image).
       NOSTR_MODE: ${NOSTR_MODE:-}
+      NOSTR_ENV_FILE: /nostr-config/.env
+      NOSTR_CURSEURS: /data/publications-nostr.db
+      NOSTR_PUBLIER_RETARDS: ${NOSTR_PUBLIER_RETARDS:-}
     volumes:
       - backend-data:/data
+      - ../nostr:/nostr-config:ro
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     restart: unless-stopped
