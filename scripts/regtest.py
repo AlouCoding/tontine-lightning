@@ -1,6 +1,7 @@
 """Outil du réseau RÉGTEST (Windows, macOS, Linux : seul Docker est requis).
 
     python scripts/regtest.py init            # mine, finance les nœuds, ouvre les canaux, crée le portefeuille LNbits, écrit .env
+    python scripts/regtest.py reparer         # après un redémarrage de Docker ou du PC : remet le réseau en état (init le fait aussi)
     python scripts/regtest.py verifier        # test réel de bout en bout : cotisation + versement sur la pile Docker
     python scripts/regtest.py payer <bolt11>  # un « membre » paie une facture (ex. le QR affiché par le frontend)
     python scripts/regtest.py soldes          # soldes des canaux et du portefeuille de la tontine
@@ -138,6 +139,107 @@ def miner(n: int = 6) -> None:
     btc("generatetoaddress", str(n), adresse)
 
 
+NOEUDS = ("lnd-tontine", "lnd-membres")
+
+CHAINE_PERDUE = (
+    "La blockchain de test de bitcoind est revenue au bloc {btc}, alors que {noeud} se souvient du bloc {lnd}.\n"
+    "Les canaux reposaient sur des blocs qui n'existent plus : ce n'est pas réparable.\n"
+    "Recréer le réseau de test (argent fictif uniquement) :\n"
+    "    docker compose down -v\n"
+    "    python scripts/regtest.py init"
+)
+
+
+def charger_portefeuille_mineur() -> bool:
+    """Charge le portefeuille « mineur » de bitcoind (un redémarrage le décharge). Vrai s'il a fallu le charger."""
+    if "mineur" in json.loads(btc("listwallets")):
+        return False
+    try:
+        btc("loadwallet", "mineur")
+    except RuntimeError:
+        btc("createwallet", "mineur")  # tout premier lancement
+    return True
+
+
+def _hauteur_btc() -> int:
+    return int(json.loads(btc("getblockchaininfo"))["blocks"])
+
+
+def _lnbits_joint_lnd(cle: str) -> bool:
+    """Sonde : LNbits arrive-t-il à créer une facture, donc à parler à lnd-tontine ?
+
+    La facture de 1 sat n'a pas l'étiquette de l'application : le pont l'ignore, elle expire seule.
+    """
+    try:
+        http_json("POST", f"{LNBITS}/api/v1/payments",
+                  {"out": False, "unit": "sat", "amount": 1, "memo": "Sonde regtest (ignorée)"}, cle=cle)
+        return True
+    except urllib.error.HTTPError as exc:
+        # Clé refusée : autre problème, que init règle en recréant le portefeuille. Pas une panne LND.
+        return exc.code in (401, 403, 404)
+    except OSError:  # LNbits injoignable ou erreur réseau
+        return False
+
+
+def reparer_apres_redemarrage() -> list[str]:
+    """Remet le réseau régtest en état après un redémarrage de Docker ou du PC.
+
+    Ne fait rien si tout va bien (sans danger à relancer). Retourne la liste des réparations faites.
+    Ordre : bitcoind -> nœuds LND -> connexion entre nœuds -> LNbits, car chacun dépend du précédent.
+    """
+    faits: list[str] = []
+
+    # 1. bitcoind et le portefeuille qui sert à miner
+    attendre(lambda: btc("getblockchaininfo"), "bitcoind")
+    if charger_portefeuille_mineur():
+        faits.append("portefeuille « mineur » de bitcoind rechargé")
+    hauteur = _hauteur_btc()
+
+    # 2. Les nœuds LND : la chaîne de bitcoind doit être au moins aussi haute que leur mémoire
+    for n in NOEUDS:
+        info = attendre(lambda n=n: lncli(n, "getinfo"), n)
+        if int(info.get("block_height", 0)) > hauteur:
+            raise RuntimeError(CHAINE_PERDUE.format(btc=hauteur, noeud=n, lnd=info["block_height"]))
+
+    # 3. Un nœud qui redémarre attend souvent un NOUVEAU bloc pour se dire synchronisé
+    if hauteur >= 101 and not all(lncli(n, "getinfo").get("synced_to_chain") for n in NOEUDS):
+        miner(1)
+        for n in NOEUDS:
+            attendre(lambda n=n: lncli(n, "getinfo").get("synced_to_chain"), f"{n} synchronisé", 90)
+        faits.append("1 bloc miné : les deux nœuds sont resynchronisés")
+
+    # 4. Reconnecter les deux nœuds : sans connexion, les canaux restent inactifs
+    canaux = lncli("lnd-tontine", "listchannels")["channels"]
+    if canaux:
+        cles = {n: lncli(n, "getinfo")["identity_pubkey"] for n in NOEUDS}
+        pairs = {p.get("pub_key") for p in lncli("lnd-tontine", "listpeers").get("peers", [])}
+        if cles["lnd-membres"] not in pairs:
+            for source, cible in (("lnd-tontine", "lnd-membres"), ("lnd-membres", "lnd-tontine")):
+                lancer(["docker", "compose", "exec", "-T", "-u", "lnd", source, "lncli", "--lnddir=/home/lnd/.lnd",
+                        "--network=regtest", "connect", f"{cles[cible]}@{cible}:9735"], verifier=False)
+            faits.append("les deux nœuds Lightning sont reconnectés")
+        attendre(lambda: len(lncli("lnd-tontine", "listchannels", "--active_only")["channels"]) >= len(canaux),
+                 "canaux actifs", 90)
+
+    # 5. LNbits garde parfois une connexion morte vers lnd-tontine : on le redémarre si besoin
+    cle = lire_env().get("LNBITS_INVOICE_KEY", "")
+    if cle:
+        attendre(lambda: _OUVREUR.open(LNBITS, timeout=5).status == 200, "LNbits", 180)
+        if not _lnbits_joint_lnd(cle):
+            lancer_visible(["docker", "compose", "restart", "lnbits"])
+            attendre(lambda: _OUVREUR.open(LNBITS, timeout=5).status == 200, "LNbits après redémarrage", 180)
+            attendre(lambda: _lnbits_joint_lnd(cle), "LNbits reconnecté à lnd-tontine", 90)
+            faits.append("LNbits redémarré et reconnecté à lnd-tontine")
+    return faits
+
+
+def _afficher_reparations(faits: list[str]) -> None:
+    for f in faits:
+        ok(f)
+    if not faits:
+        ok("rien à réparer : le réseau était déjà en état")
+
+
 # ============================================================ commandes
 def cmd_init(_: argparse.Namespace) -> None:
     etape("Démarrage des conteneurs (bitcoind, 2 nœuds LND, LNbits)")
@@ -146,17 +248,15 @@ def cmd_init(_: argparse.Namespace) -> None:
     attendre(lambda: btc("getblockchaininfo"), "bitcoind")
     ok("bitcoind répond")
 
-    etape("Portefeuille du mineur et premiers blocs")
-    if "mineur" not in json.loads(btc("listwallets")):
-        try:
-            btc("loadwallet", "mineur")
-        except RuntimeError:
-            btc("createwallet", "mineur")
-    if int(json.loads(btc("getblockchaininfo"))["blocks"]) < 101:
+    etape("Remise en état après un éventuel redémarrage (portefeuille, synchro, connexions, LNbits)")
+    _afficher_reparations(reparer_apres_redemarrage())
+
+    etape("Premiers blocs")
+    if _hauteur_btc() < 101:
         miner(101)  # une récompense de bloc n'est dépensable qu'après 100 confirmations
     ok(f"hauteur de chaîne : {json.loads(btc('getblockchaininfo'))['blocks']}")
 
-    noeuds = ("lnd-tontine", "lnd-membres")
+    noeuds = NOEUDS
     etape("Financement on-chain des deux nœuds Lightning")
     for n in noeuds:
         attendre(lambda n=n: lncli(n, "getinfo"), n)
@@ -292,6 +392,24 @@ def _canal_initie_par(source: str, cible_pub: str) -> bool:
     return False
 
 
+def cmd_reparer(_: argparse.Namespace) -> None:
+    """Le geste du jour J : relancer les conteneurs et remettre le réseau en état, sans rien recréer."""
+    etape("Démarrage de tous les conteneurs (réseau Lightning, pont, backend, frontend)")
+    # --build : reprend le dernier code récupéré par git pull (rapide si rien n'a changé, grâce au cache)
+    lancer_visible(["docker", "compose", "--profile", "pont", "--profile", "app", "up", "-d", "--build"])
+    etape("Remise en état du réseau régtest")
+    _afficher_reparations(reparer_apres_redemarrage())
+    etape("Application")
+    attendre(lambda: http_json("GET", f"{PONT}/sante"), "pont", 120)
+    ok(f"pont opérationnel sur {PONT}")
+    attendre(lambda: _OUVREUR.open(f"http://127.0.0.1:{_port('BACKEND_PORT', '8000')}/openapi.json",
+                                  timeout=5).status == 200, "backend", 120)
+    attendre(lambda: _OUVREUR.open(f"http://127.0.0.1:{_port('FRONTEND_PORT', '5173')}/",
+                                  timeout=5).status == 200, "frontend", 120)
+    ok(f"application prête sur http://127.0.0.1:{_port('FRONTEND_PORT', '5173')}")
+    print("\nTout est relancé. Vérification complète : python scripts/regtest.py verifier")
+
+
 def cmd_payer(args: argparse.Namespace) -> None:
     print(lncli("lnd-membres", "payinvoice", "--force", args.bolt11))
 
@@ -351,6 +469,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Outil du réseau régtest de Tontine Lightning")
     sous = parser.add_subparsers(dest="commande", required=True)
     sous.add_parser("init").set_defaults(f=cmd_init)
+    sous.add_parser("reparer").set_defaults(f=cmd_reparer)
     sous.add_parser("verifier").set_defaults(f=cmd_verifier)
     p = sous.add_parser("payer")
     p.add_argument("bolt11")
